@@ -1,0 +1,205 @@
+weewx-rtldavis
+Copyright 2019 Matthew Wall and Luc Heijst
+Distributed under terms of the GPLv3
+
+This is a driver for weewx that captures data from software-defined radio.
+It works with open source rtl sdr software that in turn works with
+inexpensive, broad spectrum radio receivers such as the Realtek RTL2838UHIDIR.
+These devices cost about 20$US and are capable of receiving radio signals from
+weather stations, energy monitors, doorbells, and many other devices that use
+unlicensed spectrum such as 433MHz, 838MHz, and 900MHz frequencies.
+
+
+===============================================================================
+Hardware
+
+Tested with the Realtek RTL2838UHIDIR.  Should work with any software-defined
+radio that is compatible with the rtl-sdr software. 
+
+Output from Davis Vantage Pro and Davis Vantage Vue stations is supported. 
+The driver supports currently the US and EU hop-frequencies.
+
+===============================================================================
+Installation
+
+1) install pre-requisites
+
+1.a) install weewx
+    http://weewx.com/docs.html
+
+1.b) install golang
+    eg: on raspberry pi:
+    sudo apt-get install golang
+
+2) download the driver
+
+wget -O weewx-sdr.zip https://github.com/matthewwall/weewx-rtldavis/archive/master.zip
+
+3) install the driver
+
+sudo wee_extension --install weewx-rtldavis-master.zip
+
+4) configure the weewx driver
+
+sudo wee_config --reconfigure --driver=user.rtldavis --no-prompt
+
+5) compile the GO sources when needed (see below)
+
+6) Test the rtldavis executably stand alone (see below)
+
+7) run the driver directly to identify the packets you want to capture
+
+cd /home/weewx
+sudo PYTHONPATH=bin python bin/user/rtldavis.py --cmd="/home/pi/work/bin/rtldavis"
+
+8) modify the [Rtldavis] section of weewx.conf using a text editor
+
+- check the DEFAULT_SENSOR_MAP in rtldavis.py for the extra 'freqError0' to
+  'freqError4' data you want to store in the data base (or not).
+- also check routine new_archive_record(self, event) in rtldavis.py for the 
+  extra 'pct_good_1' to 'pct_good_4' data you want to store in the data base
+- possibly modify the 'cmd' parameter
+
+9) start weewx
+
+sudo /etc/init.d/weewx start
+
+===============================================================================
+5. How to compile the GO sources
+
+5.a) create a profile for the stanard user
+    change the path of /home/pi/work when needed
+	sudo nano ~/.profile
+	export GOROOT=/usr/lib/go
+	export GOPATH=/home/pi/work
+	export PATH=$PATH:$GOROOT/bin:$GOROOT/bin
+	source ~/.profile
+5.b) compile the GO src files when needed (i.e. when changed)
+	cd $GOPATH/src/github.com/lheijst/rtldavis
+	go install -v .
+	The executable is: /home/pi/work/bin/rtldavis
+
+===============================================================================
+6. Test the rtldavis executably stand-alone with:
+	$GOPATH/bin/rtldavis
+	options:
+	-tr [transceivers]
+		[transceivers] is a combination-code of 1 to more Davis Vantage stations,
+		where: receiver 1=1, 2=2, 3=4, 4=8, 5=16, 6=32, 7=64, 8=128
+		Example: With three transceivers RSS:1, Wind:2 and Leaf-Soil:3 the value of 
+		transceivers wiil be 1 + 2 + 4 = 7 
+	-tf [transmitter-frequencies]
+		valis options are: EU or US; EU is default.
+	-ex [extra loop_period in ms]
+		When more than one sensors are read, the number of time-outs sometimes can
+		reduces with a longer loop_period. A value of 200 is OK.
+		Note: when the value of ex is too big, also time-outs will occur, so
+		try the ex settinf in small steps (of 50 ms).
+	The following options of the original rtldavis package are not in use anymore:
+	-v [extra verbose logging to stderr]
+		This option is removed
+	-id [transceiver]
+		This option is overruled by the -tr option.
+	Example: $GOPATH/bin/rtldavis -tf US -tr 3
+
+	The options below are used to search an unknown frequency band for hop
+	frequencies. For Austalia (AU) and New Zealand (NZ) these frequencies are not 
+	known yet (2019-03-16). They can be scanned with the following commands:
+	AU: $GOPATH/bin/rtldavis -startfreq 918000000 -endfreq 926000000 -stepfreq 20000
+	NZ: $GOPATH/bin/rtldavis -startfreq 921000000 -endfreq 928000000 -stepfreq 20000
+	WARNING: with a stepfreq size of 20kHz the scanning will take about 48 hours!
+
+===============================================================================
+7. How to run the driver directly
+
+Run the driver directly for testing and diagnostics.  For example, if weewx
+was installed using setup.py:
+
+cd /home/weewx
+sudo PYTHONPATH=bin python bin/user/rtldavis.py --help
+
+If weewx was installed from deb or rpm:
+
+sudo PYTHONPATH=/usr/share/weewx python /usr/share/weewx/user/rtldavis.py --help
+
+
+===============================================================================
+Configuration
+
+Use the [Rtldavis] section of the weewx configuration file (nominally weewx.conf) to
+adjust the driver configuration.
+
+The default configuration uses this command:
+
+"/home/pi/work/bin/rtldavis"
+Note: the -tf and -tr options are added automatic to the command with the options below.
+
+[Rtldavis]
+    # This section is for the rtldavis sdr-rtl USB receiver.
+    cmd = /home/pi/work/bin/rtldavis -ex 200
+
+    # Radio frequency to use between USB transceiver and console: US or EU
+    # US uses 915 MHz, EU uses 868.3 MHz.  Default is EU.
+    transceiver_frequency = EU
+    
+    # Used channels: 0=not present, 1-8)
+    # The channel of the Vantage Vue ISS or Vantage Pro or Pro2 ISS
+    iss_channel = 1
+    # The values below only apply for Vantage Pro or Pro2
+    anemometer_channel = 0
+    leaf_soil_channel = 0
+    temp_hum_1_channel = 0
+    temp_hum_2_channel = 0
+    # rain bucket type (0: 0.01 inch, 1: 0.2 mm)
+    rain_bucket_type = 1
+    
+    # Print debug messages
+    #  0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
+    debug_parse = 0    # 0
+    debug_rain = 0     # 0
+	debug_rtld = 0     # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
+
+    log_unknown_sensors = True
+    log_unmapped_sensors = True
+
+By default the logging options are False.
+    
+    # The driver to use:
+    driver = user.rtldavis
+
+===============================================================================
+How to diagnose problems
+
+First try running the rtldavis application to be sure that it works properly:
+
+$GOPATH/bin/rtldavis
+
+Be sure that you are capturing data from the sensors you care about.  To do
+this, you might want to experiment with some of the options to rtldavis.  
+
+Once that is working, run the driver directly to be sure that it is collecting
+data from the rtldavis application.
+
+cd /home/weewx
+sudo PYTHONPATH=bin python bin/user/rtldavis.py
+
+In the weewx configuration file, enter the Rtldavis options (if necessary).
+Then run weewx directly in one shell while you monitor the weewx log in a 
+separate shell:
+
+in shell 1:
+cd /home/weewx
+sudo ./bin/weewxd weewx.conf
+
+in shell 2:
+tail -f /var/log/syslog
+
+At this point, you should see data from your sensors in the weewx
+LOOP and REC output.  If not, check the log file.  Use the logging options in
+the [SDR] section of the weewx configuration file to help figure out which
+sensors are captured, recognized, and parsed.
+
+Once you are satisfied with the output when running weewx directly, run weewx
+as a daemon and configure rc script or systemd to run weewx at system startup.
+
+sudo /etc/init.d/weewx start
