@@ -2,7 +2,7 @@ weewx-rtldavis
 Copyright 2019 Matthew Wall and Luc Heijst
 Distributed under terms of the GPLv3
 
-This is a driver for weewx that captures data from software-defined radio
+This is a driver for weewx that captures data from software-defined radio 
 using the rtldavis software.
 
 
