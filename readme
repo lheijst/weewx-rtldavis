@@ -192,7 +192,7 @@ tail -f /var/log/syslog
 
 At this point, you should see data from your sensors in the weewx
 LOOP and REC output.  If not, check the log file.  Use the logging options in
-the [SDR] section of the weewx configuration file to help figure out which
+the [Rtldavis] section of the weewx configuration file to help figure out which
 sensors are captured, recognized, and parsed.
 
 Once you are satisfied with the output when running weewx directly, run weewx
