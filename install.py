@@ -13,8 +13,8 @@ class RtldavisInstaller(ExtensionInstaller):
             version="0.8",
             name='rtldavis',
             description='Capture data from rtldavis',
-            author="Matthew Wall",
-            author_email="mwall@users.sourceforge.net",
+            author="Luc Heijst",
+            author_email="lheijst@gmail.com",
             files=[('bin/user', 
                    ['bin/user/rtldavis.py'])
 			]
