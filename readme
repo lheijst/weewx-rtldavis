@@ -29,7 +29,7 @@ Installation
 
 2) download the driver
 
-wget -O weewx-sdr.zip https://github.com/lheijst/weewx-rtldavis/archive/master.zip
+wget -O weewx-rtldavis-master.zip https://github.com/lheijst/weewx-rtldavis/archive/master.zip
 
 3) install the driver
 
