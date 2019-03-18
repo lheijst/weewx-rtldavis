@@ -617,10 +617,9 @@ class RtldavisConfigurationEditor(weewx.drivers.AbstractConfEditor):
 
 	cmd = /home/pi/work/bin/rtldavis [options]
 	# Options:
-	# -ex = extra loopTime in msex
+	# -ex = extra loopTime in ms
 	# -fc = frequency correction for all channels
 	# -u  = log undefined signals
-	# -v  = log extra information to /dev/stderr
 	#
 	# The options below will autoamically be set
 	# -tf = transmitter frequencies, EU, or US
@@ -938,7 +937,9 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 	def genLoopPackets(self):
 		time_last_received = int(time.time())
 		while self._mgr.running():
-			if int(time.time()) - time_last_received > 45:
+			# the stalled timeout must be greater than the init period
+			# init period is EU: 16 s, US, AU and NZ: 133 s
+			if int(time.time()) - time_last_received > 150:
 				raise weewx.WeeWxIOError("rtldavis process stalled")
 			# program main.go writes its data to stderr
 			for lines in self._mgr.get_stderr():
