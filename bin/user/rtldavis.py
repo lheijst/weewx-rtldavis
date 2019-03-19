@@ -1321,7 +1321,8 @@ Actions:
 		mgr = ProcManager()
 		mgr.startup(options.cmd, path=options.path,
 					ld_library_path=options.ld_library_path)
-		for lines in mgr.get_stderr():
-			print "data:", lines
-		for lines in mgr.get_stderr():
-			print "err:", lines
+		while mgr.running():
+			for lines in mgr.get_stderr():
+				print "data:", lines
+			for lines in mgr.get_stdout():
+				print "err:", lines
