@@ -64,11 +64,12 @@ Run rtld on a thread and push the output onto a queue.
 	driver = user.rtldavis
 
 """
+from __future__ import print_function  # Python 2/3 compatiblity
 from __future__ import with_statement
+
 from subprocess import check_output
 import signal
 from calendar import timegm
-import Queue
 import fnmatch
 import os
 import re
@@ -78,6 +79,13 @@ import syslog
 import string
 import threading
 import time
+
+# Python 2/3 compatiblity
+try:
+	import Queue as queue	# python 2
+except ImportError:
+	import queue			# python 3
+
 import weewx.drivers
 import weewx.engine
 import weewx.units
@@ -86,7 +94,7 @@ from weeutil.weeutil import tobool
 
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.9'
+DRIVER_VERSION = '0.10'
 
 if weewx.__version__ < "3":
 	raise weewx.UnsupportedFeature("weewx 3 is required, found %s" %
@@ -184,7 +192,7 @@ def calculate_thermistor_temp(temp_raw):
 		dbg_parse(3, 'r (k ohm) %s temp_raw %s thermistor_temp %s' %
 				  (r, temp_raw, thermistor_temp))
 		return thermistor_temp
-	except ValueError, e:
+	except ValueError as e:
 		logerr('thermistor_temp failed for temp_raw %s r (k ohm) %s'
 			   'error: %s' % (temp_raw, r, e))
 	return DEFAULT_SOIL_TEMP
@@ -407,9 +415,9 @@ class ProcManager():
 	def __init__(self):
 		self._cmd = None
 		self._process = None
-		self.stderr_queue = Queue.Queue()
+		self.stderr_queue = queue.Queue()
 		self.stderr_reader = None
-		self.stdout_queue = Queue.Queue()
+		self.stdout_queue = queue.Queue()
 		self.stdout_reader = None
 
 	def get_pid(self, name):
@@ -443,7 +451,7 @@ class ProcManager():
 			self.stdout_reader = AsyncReader(
 				self._process.stdout, self.stdout_queue, 'stdout-thread')
 			self.stdout_reader.start()
-		except (OSError, ValueError), e:
+		except (OSError, ValueError) as e:
 			raise weewx.WeeWxIOError("failed to start process: %s" % e)
 
 	def shutdown(self):
@@ -462,7 +470,7 @@ class ProcManager():
 	def get_stdout(self):
 		lines = []
 		while not self.stdout_queue.empty():
-			lines.append(self.stdout_queue.get())
+			lines.append(self.stdout_queue.get().decode('utf-8'))
 		return lines
 
 	def get_stderr(self):
@@ -474,11 +482,11 @@ class ProcManager():
 		start_time = int(time.time())
 		while self.running() and int(time.time()) - start_time < 10:
 			try:			 
-				line = self.stderr_queue.get(True, 10)
+				line = self.stderr_queue.get(True, 10).decode('utf-8')
 				lines.append(line) 
 				yield lines
 				lines = []
-			except Queue.Empty:
+			except queue.Empty:
 				yield lines
 				lines = []
 
@@ -518,10 +526,10 @@ class DATAPacket(Packet):
 		if m:
 			dbg_rtld(2, "data: %s" % lines[0])
 			raw_msg = [0] * 8
-			for i in xrange(0, 8):
+			for i in range(0, 8):
 				raw_msg[i] = chr(int(m.group(i + 1), 16))
 			PacketFactory._check_crc(raw_msg)
-			for i in xrange(0, 8):
+			for i in range(0, 8):
 				raw_msg[i] = m.group(i + 1)
 			raw_pkt = bytearray([int(i, base=16) for i in raw_msg])
 			pkt = self.parse_raw(raw_pkt,
@@ -531,7 +539,7 @@ class DATAPacket(Packet):
 								  self.channels['temp_hum_1'],
 								  self.channels['temp_hum_2'],
 								  rain_per_tip)
-			for i in xrange(0, 4):
+			for i in range(0, 4):
 				pkt['curr_cnt%d' % i] = int(m.group(i + 9))
 			dbg_rtld(3, "data_pkt: %s" % pkt)
 			lines.pop(0)
@@ -554,12 +562,9 @@ class CHANNELPacket(Packet):
 			pkt['dateTime'] = int(time.time() + 0.5)
 			pkt['usUnits'] = weewx.METRIC
 			if abs(int(m.group(3))) > 20000:
-				###loginf("RESTART RTLDAVIS PROGRAM: abs freqOffset channel %s too big (> 20000): %s" % (m.group(1), m.group(3)))
 				raise weewx.WeeWxIOError("RESTART RTLDAVIS PROGRAM: abs freqOffset channel %s too big (> 20000): %s" % (m.group(1), m.group(3)))
-				#### restart the rtldavis GO program
-				###RtldavisDriver.restart(self)
-			for y in xrange(0, 5):
-			   if int(m.group(1)) == y:
+			for y in range(0, 5):
+				if int(m.group(1)) == y:
 					pkt['freqError%d' % y] = int(m.group(3))
 			dbg_rtld(3, "chan_pkt: %s" % pkt)
 			lines.pop(0)
@@ -573,7 +578,7 @@ class PacketFactory(object):
 
 	# FIXME: do this with class introspection
 	KNOWN_PACKETS = [
-		DATAPacket,  # KlimaLogg Pro sensors
+		DATAPacket,
 		CHANNELPacket
 	]
 
@@ -800,7 +805,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 		# This is used as a pointer to self.stats['loop_times'] in _update_summaries.
 		mask = 1
 		trIdCount = 0
-		for i in xrange(0, 8):
+		for i in range(0, 8):
 			if transmitters & mask != 0:
 				self.stats['activeTrIds'][trIdCount] = i
 				self.stats['activeTrIdPtrs'][i] = trIdCount
@@ -852,7 +857,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 
 	def _reset_stats(self):
 		self.stats['last_ts'] = self.stats['curr_ts']
-		for i in xrange(0, 4):
+		for i in range(0, 4):
 			self.stats['last_cnt'][i] = self.stats['curr_cnt'][i]
 			self.stats['perct_good'][i] = None
 		self.stats['pctgood'] = None
@@ -877,7 +882,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 			period = self.stats['curr_ts'] - self.stats['last_ts']
 			# do for the first 4 active transmitters
 			# Note: the stats of the 5th and more active transmitters are not calculated.
-			for i in xrange(0, 4):
+			for i in range(0, 4):
 				# if this transmitter is active
 				if self.stats['curr_cnt'][i] > 0:
 					# y is a pointer to the channel number of the active transmitters (9 means: not-active)
@@ -900,7 +905,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 			logdbg("ARCHIVE_STATS: total_max_count=%d total_count=%d total_missed=%d  pctGood=%6.2f" % 
 				(total_max_count, total_count, total_missed, self.stats['pctgood']))
 			# log the stats for each active transmitter and no-init-counters
-			for i in xrange(0, 4):
+			for i in range(0, 4):
 				if self.stats['curr_cnt'][i] > 0 and self.stats['count'][i] > 0:
 					x = self.stats['activeTrIds'][i]
 					logdbg("ARCHIVE_STATS: station %d: max_count= %4d count=%4d missed=%4d perct_good=%6.2f" % 
@@ -920,12 +925,6 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 			event.record['extraTemp3'] = self.stats['perct_good'][2]
 			event.record['leafTemp2'] = self.stats['perct_good'][3]
 		self._reset_stats()  # save current stats in last stats
-
-	def restart(self):
-		loginf("restart rtldavis GO program")
-		self._mgr.shutdown()
-		time.sleep(10)  # wait for the SDR to settle
-		self._mgr.startup(self.cmd, self.path, self.ld_library_path)
 
 	def closePort(self):
 		self._mgr.shutdown()
@@ -975,7 +974,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 								  self.channels['temp_hum_1'],
 								  self.channels['temp_hum_2'],
 								  rain_per_tip)
-		except ValueError, e:
+		except ValueError as e:
 			logerr("parse failed for '%s': %s" % (pkt, e))
 		return data
 
@@ -1310,7 +1309,7 @@ Actions:
 	(options, args) = parser.parse_args()
 
 	if options.version:
-		print "sdr driver version %s" % DRIVER_VERSION
+		print("sdr driver version %s" % DRIVER_VERSION)
 		exit(1)
 
 	if options.debug:
@@ -1323,6 +1322,6 @@ Actions:
 					ld_library_path=options.ld_library_path)
 		while mgr.running():
 			for lines in mgr.get_stderr():
-				print "data:", lines
+				print("data:", lines)
 			for lines in mgr.get_stdout():
-				print "err:", lines
+				print("err:", lines)
