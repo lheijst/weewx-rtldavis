@@ -1,4 +1,18 @@
+0.11 05apr2019
+* fixed: self.rain_per_tip is now 0.254 inch for bucket_type 0; 
+    thanks to Paul Anderson for detecting this bug
+* cleaned up coding
+* removed parameters log_unknown_sensors and log_unmapped_sensors
+* added parameter save_pct_good_per_transmitter; default is False
+* saving frequency errors of first 5 frequencies now limited to EU band
+* pct_good of transmitter 1 is not saved when we have only one transmitter
+    because pct_good_0 is the same as pct_good_all
+* the mapping of pct_good per channel is now controlled by the DEFAULT_SENSOR_MAP
+    note: the mapping of pct_good_all remains hardcoded mapped to rxCheckPercent
+* added debug logging for raw humidity data; default: no logging
+
 0.10 26mar2019
 * converted for use with both python 2 and python 3
+
 0.9 16mar2019
 * initial release
