@@ -957,7 +957,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         else:
                             if packet:
                                 dbg_parse(3, "ignoring duplicate packet %s" % packet)
-                    elif self._log_unknown and lines:
+                    elif lines:
                         loginf("missed (unparsed): %s" % lines)
         else:
             logerr("err: %s" % self._mgr.get_stderr())
