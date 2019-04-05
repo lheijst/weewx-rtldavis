@@ -33,7 +33,7 @@ Run rtld on a thread and push the output onto a queue.
 
 [Rtldavis]
     # This section is for the rtldavis sdr-rtl USB receiver.
-    cmd = /home/pi/work/bin/rtldavis -ex 200
+    cmd = /home/pi/work/bin/rtldavis 
 
     # Radio frequency to use between USB transceiver and console: US or EU
     # US uses 915 MHz, EU uses 868.3 MHz.  Default is EU.
@@ -43,23 +43,23 @@ Run rtld on a thread and push the output onto a queue.
     # The channel of the Vantage Vue ISS or Vantage Pro or Pro2 ISS
     iss_channel = 1
     # The values below only apply for Vantage Pro or Pro2
-    anemometer_channel = 2  # 2
-    leaf_soil_channel  = 3  # 3
+    anemometer_channel = 0
+    leaf_soil_channel  = 0
     temp_hum_1_channel = 0
     temp_hum_2_channel = 0
     # rain bucket type (0: 0.01 inch, 1: 0.2 mm)
     rain_bucket_type = 1
     
     # Print debug messages
-    #  0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
-    debug_parse = 0    # 0
-    debug_rain = 0     # 0
-    debug_rtld = 3     # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
+    # 0=no logging; 1=minimum logging; 2=normal logging; 3=detailed logging
+    debug_parse = 0
+    debug_rain  = 0
+    debug_rtld  = 2    # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
 
-    log_unknown_sensors = True
-    log_unmapped_sensors = True
-    The default for each of these is False.
-    
+    # The pct_good per transmitter can be saved to the database
+    # This has only effect with 2 transmitters or more
+    save_pct_good_per_transmitter = False
+
     # The driver to use:
     driver = user.rtldavis
 
@@ -94,7 +94,7 @@ from weeutil.weeutil import tobool
 
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.10'
+DRIVER_VERSION = '0.11'
 
 if weewx.__version__ < "3":
     raise weewx.UnsupportedFeature("weewx 3 is required, found %s" %
@@ -500,27 +500,13 @@ class Packet:
     def parse_text(ts, payload, lines):
         return None
 
-    @staticmethod
-    def add_identifiers(pkt, sensor_id='', packet_type=''):
-        # qualify each field name with details about the sensor.  not every
-        # sensor has all three fields.
-        # observation.<sensor_id>.<packet_type>
-        packet = dict()
-        if 'dateTime' in pkt:
-            packet['dateTime'] = pkt.pop('dateTime', 0)
-        if 'usUnits' in pkt:
-            packet['usUnits'] = pkt.pop('usUnits', 0)
-        for n in pkt:
-            packet["%s.%s.%s" % (n, sensor_id, packet_type)] = pkt[n]
-        return packet
-
 
 class DATAPacket(Packet):
     IDENTIFIER = re.compile("^\d\d:\d\d:\d\d.[\d]{6} [0-9A-F][0-7][0-9A-F]{14}")
     PATTERN = re.compile('([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2})([0-9A-F]{2}) ([\d]+) ([\d]+) ([\d]+) ([\d]+)')
 
     @staticmethod
-    def parse_text(self, payload, lines, rain_per_tip):
+    def parse_text(self, payload, lines):
         pkt = dict()
         m = DATAPacket.PATTERN.search(lines[0])
         if m:
@@ -532,13 +518,7 @@ class DATAPacket(Packet):
             for i in range(0, 8):
                 raw_msg[i] = m.group(i + 1)
             raw_pkt = bytearray([int(i, base=16) for i in raw_msg])
-            pkt = self.parse_raw(raw_pkt,
-                                  self.channels['iss'],
-                                  self.channels['anemometer'],
-                                  self.channels['leaf_soil'],
-                                  self.channels['temp_hum_1'],
-                                  self.channels['temp_hum_2'],
-                                  rain_per_tip)
+            pkt = self.parse_raw(self, raw_pkt)
             for i in range(0, 4):
                 pkt['curr_cnt%d' % i] = int(m.group(i + 9))
             dbg_rtld(3, "data_pkt: %s" % pkt)
@@ -554,19 +534,24 @@ class CHANNELPacket(Packet):
     PATTERN = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+)')
 
     @staticmethod
-    def parse_text(self, payload, lines, rain_per_tip):
+    def parse_text(self, payload, lines):
         pkt = dict()
         m = CHANNELPacket.PATTERN.search(lines[0])
         if m:
             dbg_rtld(2, "chan: %s" % lines[0])
-            pkt['dateTime'] = int(time.time() + 0.5)
-            pkt['usUnits'] = weewx.METRIC
+
             if abs(int(m.group(3))) > 20000:
                 raise weewx.WeeWxIOError("RESTART RTLDAVIS PROGRAM: abs freqOffset channel %s too big (> 20000): %s" % (m.group(1), m.group(3)))
-            for y in range(0, 5):
-                if int(m.group(1)) == y:
-                    pkt['freqError%d' % y] = int(m.group(3))
-            dbg_rtld(3, "chan_pkt: %s" % pkt)
+            # save frequency errors only for EU band
+            if self.frequency == 'EU':
+                pkt['dateTime'] = int(time.time() + 0.5)
+                pkt['usUnits'] = weewx.METRIC
+                for y in range(0, 5):
+                    if int(m.group(1)) == y:
+                        pkt['freqError%d' % y] = int(m.group(3))
+                dbg_rtld(3, "chan_pkt: %s" % pkt)
+            else:
+                dbg_rtld(3, "Don't store freqErrors for frequency band %s" % self.frequency)
             lines.pop(0)
             return pkt
         else:
@@ -588,22 +573,22 @@ class PacketFactory(object):
             raise ValueError("CRC error")
 
     @staticmethod
-    def create(self, lines, rain_per_tip):
+    def create(self, lines):
         # return a list of packets from the specified lines
         while lines:
-            pkt = PacketFactory.parse_text(self, lines, rain_per_tip)
+            pkt = PacketFactory.parse_text(self, lines)
             if pkt is not None:
                 yield pkt
 
     @staticmethod
-    def parse_text(self, lines, rain_per_tip):
+    def parse_text(self, lines):
         pkt = dict()
         payload = lines[0].strip()
         if payload:
             for parser in PacketFactory.KNOWN_PACKETS:
                 m = parser.IDENTIFIER.search(payload)
                 if m:
-                    pkt = parser.parse_text(self, payload, lines, rain_per_tip)
+                    pkt = parser.parse_text(self, payload, lines)
                     return pkt
             dbg_rtld(1, "info: %s" % payload)
         else:
@@ -652,9 +637,10 @@ class RtldavisConfigurationEditor(weewx.drivers.AbstractConfEditor):
     debug_rain  = 0
     debug_rtld  = 2     # rtldavis logging: 1=inf; 2=(1)+data+chan; 3=(2)+pkt
 
-    log_unknown_sensors = True
-    log_unmapped_sensors = True
-    
+    # The pct_good per transmitter can be saved to the database
+    # This has only effect with 2 transmitters or more
+    save_pct_good_per_transmitter = False
+
     # The driver to use:
     driver = user.rtldavis
 
@@ -696,7 +682,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         'soilMoist4': 'soil_moisture_4',
         'leafWet1': 'leaf_wetness_1',
         'leafWet2': 'leaf_wetness_2',
-        'rxCheckPercent': 'pct_good', # updated in 
+        'rxCheckPercent': 'pct_good_all', # updated in 
         'txBatteryStatus': 'bat_iss',
         'supplyVoltage': 'supercap_volt',
         'referenceVoltage': 'solar_power',
@@ -704,10 +690,10 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         'rainBatteryStatus': 'bat_leaf_soil',
         'outTempBatteryStatus': 'bat_th_1',
         'inTempBatteryStatus': 'bat_th_2',
-        'extraTemp1': 'pct_good_1',  # renamed
-        'extraTemp2': 'pct_good_2',  # renamed
-        'extraTemp3': 'pct_good_3',  # renamed
-        'leafTemp2': 'pct_good_4',   # renamed
+        'extraTemp1': 'pct_good_0',  # renamed
+        'extraTemp2': 'pct_good_1',  # renamed
+        'extraTemp3': 'pct_good_2',  # renamed
+        'leafTemp2': 'pct_good_3',   # renamed
         'consBatteryVoltage': 'freqError0',
         'hail': 'freqError1',
         'hailRate': 'freqError2',
@@ -728,11 +714,15 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         global DEBUG_RTLD
         DEBUG_RTLD = int(stn_dict.get('debug_rtld', DEBUG_RTLD))
 
+        # modification by Luc Heijst
+        self.last_hum = None
+        # end modification by Luc
+
         bucket_type = int(stn_dict.get('rain_bucket_type',
                                        self.DEFAULT_RAIN_BUCKET_TYPE))
         if bucket_type not in [0, 1]:
             raise ValueError("unsupported rain bucket type %s" % bucket_type)
-        self.rain_per_tip = 0.0254 if bucket_type == 0 else 0.2 # mm
+        self.rain_per_tip = 0.254 if bucket_type == 0 else 0.2 # mm
         loginf('using rain_bucket_type %s' % bucket_type)
         self.sensor_map = dict(self.DEFAULT_SENSOR_MAP)
         if 'sensor_map' in stn_dict:
@@ -740,8 +730,8 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         loginf('sensor map is: %s' % self.sensor_map)
         self._init_stats()
         self.last_rain_count = None
-        self._log_unknown = tobool(stn_dict.get('log_unknown_sensors', False))
-        self._log_unmapped = tobool(stn_dict.get('log_unmapped_sensors', False))
+        self._log_humidity_raw = tobool(stn_dict.get('log_humidity_raw', False))
+        self._save_pct_good_per_transmitter = tobool(stn_dict.get('save_pct_good_per_transmitter', False))
         self._sensor_map = stn_dict.get('sensor_map', {})
         loginf('sensor map is %s' % self._sensor_map)
         self.cmd = stn_dict.get('cmd', DEFAULT_CMD)
@@ -770,10 +760,11 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         loginf('using temp_hum_1_channel %s' % channels['temp_hum_1'])
         loginf('using temp_hum_2_channel %s' % channels['temp_hum_2'])
 
-        self.transmitters = RtldavisDriver.ch_to_xmit(self, 
+        self.transmitters, self.tr_count = RtldavisDriver.ch_to_xmit(self, 
             channels['iss'], channels['anemometer'], channels['leaf_soil'],
             channels['temp_hum_1'], channels['temp_hum_2'])
         loginf('using transmitters %d' % self.transmitters)
+        loginf('log_humidity_raw %s' % self._log_humidity_raw)
 
         self.cmd = self.cmd + " -tf " + str(self.frequency) + " -tr " + str(self.transmitters)
 
@@ -811,7 +802,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 self.stats['activeTrIdPtrs'][i] = trIdCount
                 trIdCount = trIdCount + 1
             mask = mask << 1
-        return transmitters
+        return transmitters, trIdCount
 
     def _data_to_packet(self, data):
         packet = dict()
@@ -843,24 +834,24 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         self.stats = {
             # theoretical loop times for 8 transmitter channels (plus 100.0 as dummy)
             'loop_times': [2.5625, 2.625, 2.6875, 2.75, 2.8125, 2.875, 2.9375, 3, 100.0],
-            'activeTrIds': [9] * 8,   # 9 means: sensor not active
-            'activeTrIdPtrs': [0] * 8,# pointer to active transmitter
+            'activeTrIds': [9] * 8,    # 9 means: sensor not active
+            'activeTrIdPtrs': [0] * 8, # pointer to active transmitter
             'curr_ts': 0,              # time stamp of current archive  
             'last_ts': 0,              # time stamp of previous archive
-            'curr_cnt': [0] * 4,      # received messages since startup at current archive
-            'last_cnt': [0] * 4,      # received messages since startup at previous archive
+            'curr_cnt': [0] * 4,       # received messages since startup at current archive
+            'last_cnt': [0] * 4,       # received messages since startup at previous archive
             'max_count': [0] * 4,      # max to receive messages per transmitter current archive period
             'count': [0] * 4,          # received messages per transmitter current archive period 
-            'missed': [0] * 4,          # missed messages per transmitter current archive period
-            'perct_good': [None] * 4, # percentage of good messages per transmitter
-            'pctgood': None}          # percentage of good messages for all transmitters
+            'missed': [0] * 4,         # missed messages per transmitter current archive period
+            'pct_good': [None] * 4,    # percentage of good messages per transmitter
+            'pct_good_all': None}      # percentage of good messages for all transmitters
 
     def _reset_stats(self):
         self.stats['last_ts'] = self.stats['curr_ts']
         for i in range(0, 4):
             self.stats['last_cnt'][i] = self.stats['curr_cnt'][i]
-            self.stats['perct_good'][i] = None
-        self.stats['pctgood'] = None
+            self.stats['pct_good'][i] = None
+        self.stats['pct_good_all'] = None
 
     def _update_stats(self, curr_cnt0, curr_cnt1, curr_cnt2, curr_cnt3):
         # update the statistics
@@ -894,36 +885,46 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                     # test if not init (counters reset to zero)
                     if self.stats['count'][i] > 0:
                         self.stats['missed'][i] = self.stats['max_count'][i] - self.stats['count'][i]
-                        self.stats['perct_good'][i] = 100.0 * self.stats['count'][i] / self.stats['max_count'][i]
+                        self.stats['pct_good'][i] = 100.0 * self.stats['count'][i] / self.stats['max_count'][i]
                         # calculate the totals for all active transmitters
                         total_count = total_count + self.stats['count'][i]
                         total_missed = total_missed + self.stats['missed'][i]
                         total_max_count = total_max_count + self.stats['max_count'][i]
             # if there is a total
             if total_max_count > 0:
-                self.stats['pctgood'] = 100.0 * total_count / total_max_count
+                self.stats['pct_good_all'] = 100.0 * total_count / total_max_count
             logdbg("ARCHIVE_STATS: total_max_count=%d total_count=%d total_missed=%d  pctGood=%6.2f" % 
-                (total_max_count, total_count, total_missed, self.stats['pctgood']))
+                (total_max_count, total_count, total_missed, self.stats['pct_good_all']))
             # log the stats for each active transmitter and no-init-counters
             for i in range(0, 4):
                 if self.stats['curr_cnt'][i] > 0 and self.stats['count'][i] > 0:
                     x = self.stats['activeTrIds'][i]
-                    logdbg("ARCHIVE_STATS: station %d: max_count= %4d count=%4d missed=%4d perct_good=%6.2f" % 
-                        (i+1, self.stats['max_count'][i], self.stats['count'][i], self.stats['missed'][i], self.stats['perct_good'][i]))
+                    logdbg("ARCHIVE_STATS: station %d: max_count= %4d count=%4d missed=%4d pct_good=%6.2f" % 
+                        (i+1, self.stats['max_count'][i], self.stats['count'][i], self.stats['missed'][i], self.stats['pct_good'][i]))
 
     def new_archive_record(self, event):
         logdbg("new_archive_record")
         # calculations per archive period
         self._update_summaries()  # calculate summaries
-        # store the summaries in the database
-        # Note: we can't use the names in the DEFAULT_SENSOR_MAP
-        # but use the real database field names
-        if self.stats['pctgood'] is not None:
-            event.record['rxCheckPercent'] = self.stats['pctgood']
-            event.record['extraTemp1'] = self.stats['perct_good'][0]
-            event.record['extraTemp2'] = self.stats['perct_good'][1]
-            event.record['extraTemp3'] = self.stats['perct_good'][2]
-            event.record['leafTemp2'] = self.stats['perct_good'][3]
+        # Store the summaries in the database
+        # for the pct_good values in the DEFAULT_SENSOR_MAP
+        if self.stats['pct_good_all'] is not None:
+            # Store overal pct_good if value not None
+            event.record['rxCheckPercent'] = self.stats['pct_good_all']
+            # test if individual pct_good values have to be saved
+            if self._save_pct_good_per_transmitter:
+                for tr in range(0, 4):
+                    data = 'pct_good_%s' % tr
+                    for k in self.sensor_map:
+                        # Test if sensor is in the sensor map.
+                        if self.sensor_map[k] in data:
+                            if tr == 0 and self.tr_count > 1:
+                                # When tr_count = 1 we don't store the pct_good of transmitter 1
+                                # because the value is the same as in rxCheckPercent
+                                event.record[k] = self.stats['pct_good'][tr]
+                            if tr > 0 and tr <= self.tr_count:
+                                # save pct_good for active transmitters (max=4)
+                                event.record[k] = self.stats['pct_good'][tr]
         self._reset_stats()  # save current stats in last stats
 
     def closePort(self):
@@ -942,7 +943,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 raise weewx.WeeWxIOError("rtldavis process stalled")
             # program main.go writes its data to stderr
             for lines in self._mgr.get_stderr():
-                for data in PacketFactory.create(self, lines, self.rain_per_tip):
+                for data in PacketFactory.create(self, lines):
                     if data:
                         time_last_received = int(time.time())
                         if 'curr_cnt0' in data:
@@ -956,40 +957,34 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         else:
                             if packet:
                                 dbg_parse(3, "ignoring duplicate packet %s" % packet)
-                    elif self._log_unknown:
+                    elif self._log_unknown and lines:
                         loginf("missed (unparsed): %s" % lines)
         else:
             logerr("err: %s" % self._mgr.get_stderr())
             raise weewx.WeeWxIOError("rtldavis process is not running")
 
-    def parse_readings(self, pkt, rain_per_tip):
+    def parse_readings(self, pkt):
         data = dict()
         if not pkt:
             return data
         try:
-            data = self.parse_raw(pkt,
-                                  self.channels['iss'],
-                                  self.channels['anemometer'],
-                                  self.channels['leaf_soil'],
-                                  self.channels['temp_hum_1'],
-                                  self.channels['temp_hum_2'],
-                                  rain_per_tip)
+            data = self.parse_raw(self, pkt)
         except ValueError as e:
             logerr("parse failed for '%s': %s" % (pkt, e))
         return data
 
     @staticmethod
-    def parse_raw(pkt, iss_ch, wind_ch, ls_ch, th1_ch, th2_ch, rain_per_tip):
+    def parse_raw(self, pkt):
         data = dict()
         data['channel'] = (pkt[0] & 0x7) + 1
         battery_low = (pkt[0] >> 3) & 0x1
-        if data['channel'] == iss_ch or data['channel'] == wind_ch \
-                or data['channel'] == th1_ch or data['channel'] == th2_ch:
-            if data['channel'] == iss_ch:
+        if data['channel'] == self.channels['iss']or data['channel'] == self.channels['anemometer'] \
+                or data['channel'] == self.channels['temp_hum_1']or data['channel'] == self.channels['temp_hum_2']:
+            if data['channel'] == self.channels['iss']:
                 data['bat_iss'] = battery_low
-            elif data['channel'] == wind_ch:
+            elif data['channel'] == self.channels['anemometer']:
                 data['bat_anemometer'] = battery_low
-            elif data['channel'] == th1_ch:
+            elif data['channel'] == self.channels['temp_hum_1']:
                 data['bat_th_1'] = battery_low
             else:
                 data['bat_th_2'] = battery_low
@@ -1079,7 +1074,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 # message examples:
                 # 50 00 00 FF 75 00 48 5B (no rain)
                 # 50 00 00 FE 75 00 7F 6B (light_rain)
-                # I 100 50 00 00 1B 15 00 3F 80 (heavy_rain)
+                # 50 00 00 1B 15 00 3F 80 (heavy_rain)
                 # 51 00 DB FF 73 00 11 41 (no sensor)
                 """ The published rain_rate formulas differ from each
                 other. For both light and heavy rain we like to know a
@@ -1089,7 +1084,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 time_between_tips_raw = ((pkt[4] & 0x30) << 4) + pkt[3]  # typical: 64-1022
                 dbg_parse(2, "time_between_tips_raw=%03x (%s)" %
                           (time_between_tips_raw, time_between_tips_raw))
-                if data['channel'] == iss_ch: # rain sensor is present
+                if data['channel'] == self.channels['iss']: # rain sensor is present
                     rain_rate = None
                     if time_between_tips_raw == 0x3FF:
                         # no rain
@@ -1099,14 +1094,14 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         # heavy rain. typical value:
                         # 64/16 - 1020/16 = 4 - 63.8 (180.0 - 11.1 mm/h)
                         time_between_tips = time_between_tips_raw / 16.0
-                        rain_rate = 3600.0 / time_between_tips * rain_per_tip
+                        rain_rate = 3600.0 / time_between_tips * self.rain_per_tip
                         dbg_parse(2, "heavy_rain=%s mm/h, time_between_tips=%s s" %
                                   (rain_rate, time_between_tips))
                     else:
                         # light rain. typical value:
                         # 64 - 1022 (11.1 - 0.8 mm/h)
                         time_between_tips = time_between_tips_raw
-                        rain_rate = 3600.0 / time_between_tips * rain_per_tip
+                        rain_rate = 3600.0 / time_between_tips * self.rain_per_tip
                         dbg_parse(2, "light_rain=%s mm/h, time_between_tips=%s s" %
                                   (rain_rate, time_between_tips))
                     data['rain_rate'] = rain_rate
@@ -1138,7 +1133,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 # message examples:
                 # 80 00 00 33 8D 00 25 11 (digital temp)
 
-                # I 100 81 00 00 59 45 00 A3 E6 (analog temp)
+                # 81 00 00 59 45 00 A3 E6 (analog temp)
                 # 81 00 DB FF C3 00 AB F8 (no sensor)
                 temp_raw = (pkt[3] << 4) + (pkt[4] >> 4)  # 12-bits temp value
                 if temp_raw != 0xFFC:
@@ -1154,9 +1149,9 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         temp_c = calculate_thermistor_temp(temp_raw)
                         dbg_parse(2, "thermistor temp_raw=0x%03x temp_c=%s"
                                   % (temp_raw, temp_c))
-                    if data['channel'] == th1_ch:
+                    if data['channel'] == self.channels['temp_hum_1']:
                         data['temp_1'] = temp_c
-                    elif data['channel'] == th2_ch:
+                    elif data['channel'] == self.channels['temp_hum_2']:
                         data['temp_2'] = temp_c
                     else:
                         data['temperature'] = temp_c
@@ -1176,18 +1171,27 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 # outside humidity
                 # message examples:
                 # A0 00 00 C9 3D 00 2A 87
-                # I 100 A1 00 DB 00 03 00 47 C7 (no sensor)
+                # A1 00 DB 00 03 00 47 C7 (no sensor)
                 humidity_raw = ((pkt[4] >> 4) << 8) + pkt[3]
                 if humidity_raw != 0:
                     humidity = humidity_raw / 10.0
-                    if data['channel'] == th1_ch:
+                    if data['channel'] == self.channels['temp_hum_1']:
                         data['humid_1'] = humidity
-                    elif data['channel'] == th2_ch:
+                    elif data['channel'] == self.channels['temp_hum_2']:
                         data['humid_2'] = humidity
                     else:
                         data['humidity'] = humidity
                     dbg_parse(2, "humidity_raw=0x%03x value=%s" %
                               (humidity_raw, humidity))
+                    # modification by Luc Heijst
+                    if self._log_humidity_raw:
+                        # we don't know which bits are used by the old humidity sensor
+                        # so we log the full 16 bit code.
+                        humidity_raw_full = (pkt[4] << 8) + pkt[3]
+                        if self.last_hum is not None and humidity_raw_full != self.last_hum:
+                            loginf("rtldavis-luc: humidity_raw= %04x" % humidity_raw_full)
+                        self.last_hum = humidity_raw_full
+                    # end modification by Luc
             elif message_type == 0xC:
                 # unknown message
                 # message example:
@@ -1216,7 +1220,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 # unknown message type
                 logerr("unknown message type 0x%01x" % message_type)
 
-        elif data['channel'] == ls_ch:
+        elif data['channel'] == self.channels['leaf_soil']:
             # leaf and soil station
             data['bat_leaf_soil'] = battery_low
             data_type = pkt[0] >> 4
@@ -1251,7 +1255,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 elif data_subtype == 2:
                     # leaf wetness
                     # message examples:
-                    # I 100 F2 0A D4 55 80 00 90 06
+                    # F2 0A D4 55 80 00 90 06
                     # F2 2A 00 FF 40 C0 4F 05 (no sensor)
                     if pkt[3] != 0xFF:
                         # leaf temperature
