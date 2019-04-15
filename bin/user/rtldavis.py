@@ -94,7 +94,7 @@ from weeutil.weeutil import tobool
 
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.11'
+DRIVER_VERSION = '0.12'
 
 if weewx.__version__ < "3":
     raise weewx.UnsupportedFeature("weewx 3 is required, found %s" %
@@ -1170,11 +1170,17 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
             elif message_type == 0xA:
                 # outside humidity
                 # message examples:
-                # A0 00 00 C9 3D 00 2A 87
+                # A0 00 00 C9 3D 00 2A 87 (digital sensor)
+                # A0 00 00 22 85 00 ED E3 (analog sensor)
                 # A1 00 DB 00 03 00 47 C7 (no sensor)
                 humidity_raw = ((pkt[4] >> 4) << 8) + pkt[3]
                 if humidity_raw != 0:
-                    humidity = humidity_raw / 10.0
+                    if pkt[4] & 0x0f == 0xd:
+                        # digital sensor
+                        humidity = humidity_raw / 10.0
+                    else:
+                        # analog sensor (pkt[4] & 0x0f == 0x5)
+                        humidity = humidity_raw * -0.301 + 710.23
                     if data['channel'] == self.channels['temp_hum_1']:
                         data['humid_1'] = humidity
                     elif data['channel'] == self.channels['temp_hum_2']:
