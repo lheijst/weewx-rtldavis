@@ -1170,12 +1170,14 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
             elif message_type == 0xA:
                 # outside humidity
                 # message examples:
-                # A0 00 00 C9 3D 00 2A 87 (digital sensor)
+                # A0 00 00 C9 3D 00 2A 87 (digital sensor, variant a)
+                # A0 01 3A 80 3B 00 ED 0E (digital sensor, variant b)
+                # A0 01 41 7F 39 00 18 65 (digital sensor, variant c)
                 # A0 00 00 22 85 00 ED E3 (analog sensor)
                 # A1 00 DB 00 03 00 47 C7 (no sensor)
                 humidity_raw = ((pkt[4] >> 4) << 8) + pkt[3]
                 if humidity_raw != 0:
-                    if pkt[4] & 0x0f == 0xd:
+                    if pkt[4] & 0x08 == 0x8:
                         # digital sensor
                         humidity = humidity_raw / 10.0
                     else:
