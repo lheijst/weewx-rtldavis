@@ -1,3 +1,8 @@
+0.16 11may2020
+* added new-style weewx logging with fallback to old-style logging
+* changed the storage of frequency errors per transmitter (for EU systems only)
+    with fallback for use with rtldavis versions v12 and earlier
+* added the handling of New Zealand stations via parameter '-tf NZ'
 0.11 05apr2019
 * fixed: self.rain_per_tip is now 0.254 inch for bucket_type 0; 
     thanks to Paul Anderson for detecting this bug
