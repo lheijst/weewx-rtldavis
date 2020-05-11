@@ -22,6 +22,11 @@
 # FOR A PARTICULAR PURPOSE.
 #
 # See http://www.gnu.org/licenses/
+#
+# 27-04-2020 release note:
+# This version of rtldavis.py works best with version 0.13 of main.go or higher.
+# For EU frequencies the freqError values are stored in the database in 
+# time slots of two days per transmitter (when activated).
 
 """
 Collect data from rtldavis  
@@ -35,8 +40,8 @@ Run rtld on a thread and push the output onto a queue.
     # This section is for the rtldavis sdr-rtl USB receiver.
     cmd = /home/pi/work/bin/rtldavis 
 
-    # Radio frequency to use between USB transceiver and console: US or EU
-    # US uses 915 MHz, EU uses 868.3 MHz.  Default is EU.
+    # Radio frequency to use between USB transceiver and console: US, NZ or EU
+    # US uses 915 MHz, NZ uses 921 MHz and EU uses 868.3 MHz.  Default is EU.
     transceiver_frequency = EU
     
     # Used channels: 0=not present, 1-8)
@@ -75,7 +80,6 @@ import os
 import re
 import subprocess
 import math
-import syslog
 import string
 import threading
 import time
@@ -92,9 +96,39 @@ import weewx.units
 from weewx.crc16 import crc16
 from weeutil.weeutil import tobool
 
+try:
+    # Test for new-style weewx logging by trying to import weeutil.logger
+    import weeutil.logger
+    import logging
+    log = logging.getLogger(__name__)
+
+    def logdbg(msg):
+        log.debug(msg)
+
+    def loginf(msg):
+        log.info(msg)
+
+    def logerr(msg):
+        log.error(msg)
+
+except ImportError:
+    # Old-style weewx logging
+    import syslog
+
+    def logmsg(level, msg):
+        syslog.syslog(level, 'rtldavis: %s:' % msg)
+
+    def logdbg(msg):
+        logmsg(syslog.LOG_DEBUG, msg)
+
+    def loginf(msg):
+        logmsg(syslog.LOG_INFO, msg)
+
+    def logerr(msg):
+        logmsg(syslog.LOG_ERR, msg)
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.12'
+DRIVER_VERSION = '0.16'
 
 if weewx.__version__ < "3":
     raise weewx.UnsupportedFeature("weewx 3 is required, found %s" %
@@ -109,7 +143,7 @@ if weewx.__version__ < "3":
 # To reduce other disturbances, place a sensor in about 2m distance for the first 
 # test.
 # 
-# Call with:  /home/pi/work/bin/rtldavis -tf [transceiver-frequency: EU or US] -tr [transmitters]} 
+# Call with:  /home/pi/work/bin/rtldavis -tf [transceiver-frequency: US, NZ or EU] -tr [transmitters]} 
 #
 DEFAULT_CMD = '/home/pi/work/bin/rtldavis -tf EU' 
 DEBUG_RAIN = 0
@@ -122,23 +156,6 @@ def loader(config_dict, engine):
 
 def confeditor_loader():
     return RtldavisConfigurationEditor()
-
-def logmsgt(level, msg):
-    syslog.syslog(level, 'rtldavis: %s: %s' %
-                  (threading.currentThread().getName(), msg))
-
-def logmsg(level, msg):
-    syslog.syslog(level, 'rtldavis: %s' %
-                  (msg))
-
-def logdbg(msg):
-    logmsg(syslog.LOG_DEBUG, msg)
-
-def loginf(msg):
-    logmsg(syslog.LOG_INFO, msg)
-
-def logerr(msg):
-    logmsg(syslog.LOG_ERR, msg)
 
 def dbg_parse(verbosity, msg):
     if DEBUG_PARSE >= verbosity:
@@ -531,12 +548,15 @@ class DATAPacket(Packet):
 
 class CHANNELPacket(Packet):
     IDENTIFIER = re.compile("ChannelIdx:")
-    PATTERN = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+)')
+    # chan: 13:44:13.116046 Hop: {ChannelIdx:3 ChannelFreq:868437250 FreqError:431 Transmitter:1}
+    PATTERNv13 = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+) Transmitter:([\d]+)')
+    PATTERNv12 = re.compile('ChannelIdx:([\d]+) ChannelFreq:([\d]+) FreqError:([\d-]+)')
 
     @staticmethod
     def parse_text(self, payload, lines):
         pkt = dict()
-        m = CHANNELPacket.PATTERN.search(lines[0])
+        # check for channelpacket of rtldavis version 13 and higher
+        m = CHANNELPacket.PATTERNv13.search(lines[0])
         if m:
             dbg_rtld(2, "chan: %s" % lines[0])
 
@@ -544,19 +564,45 @@ class CHANNELPacket(Packet):
                 raise weewx.WeeWxIOError("RESTART RTLDAVIS PROGRAM: abs freqOffset channel %s too big (> 20000): %s" % (m.group(1), m.group(3)))
             # save frequency errors only for EU band
             if self.frequency == 'EU':
-                pkt['dateTime'] = int(time.time() + 0.5)
-                pkt['usUnits'] = weewx.METRIC
-                for y in range(0, 5):
-                    if int(m.group(1)) == y:
-                        pkt['freqError%d' % y] = int(m.group(3))
-                dbg_rtld(3, "chan_pkt: %s" % pkt)
+                # Store the FreqErrors only for one transmitter
+                # The data for each transmitter is stored during 2 full days
+                if int(m.group(4)) == self.transm_to_store:
+                    pkt['dateTime'] = int(time.time() + 0.5)
+                    pkt['usUnits'] = weewx.METRICWX
+                    for y in range(0, 5):
+                        if int(m.group(1)) == y:
+                            pkt['freqError%d' % y] = int(m.group(3))
+                            dbg_rtld(3, "Store freqError%d: %s for transmitter: %s" % (y, int(m.group(3)), int(m.group(4))))
+                    dbg_rtld(3, "chan_pkt: %s" % pkt)
+                else:
+                    dbg_rtld(3, "Don't store freqErr: %s for transm: %s" % (int(m.group(3)), int(m.group(4))))
             else:
                 dbg_rtld(3, "Don't store freqErrors for frequency band %s" % self.frequency)
             lines.pop(0)
             return pkt
         else:
-            dbg_rtld(1, "CHANNELPacket: unrecognized data: '%s'" % lines[0])
-            lines.pop(0)
+            # check for channelpacket of rtldavis version 12 and lower
+            m = CHANNELPacket.PATTERNv12.search(lines[0])
+            if m:
+                dbg_rtld(2, "chan: %s" % lines[0])
+
+                if abs(int(m.group(3))) > 20000:
+                    raise weewx.WeeWxIOError("RESTART RTLDAVIS PROGRAM: abs freqOffset channel %s too big (> 20000): %s" % (m.group(1), m.group(3)))
+                # save frequency errors only for EU band
+                if self.frequency == 'EU':
+                    pkt['dateTime'] = int(time.time() + 0.5)
+                    pkt['usUnits'] = weewx.METRICWX
+                    for y in range(0, 5):
+                        if int(m.group(1)) == y:
+                            pkt['freqError%d' % y] = int(m.group(3))
+                    dbg_rtld(3, "chan_pkt: %s" % pkt)
+                else:
+                    dbg_rtld(3, "Don't store freqErrors for frequency band %s" % self.frequency)
+                lines.pop(0)
+                return pkt
+            else:
+                dbg_rtld(1, "CHANNELPacket: unrecognized data: '%s'" % lines[0])
+                lines.pop(0)
 
 
 class PacketFactory(object):
@@ -607,17 +653,19 @@ class RtldavisConfigurationEditor(weewx.drivers.AbstractConfEditor):
 
     cmd = /home/pi/work/bin/rtldavis [options]
     # Options:
-    # -ex = extra loopTime in ms
-    # -fc = frequency correction for all channels
+    # -ppm = frequency correction of rtl dongle in ppm; default = 0
+    # -gain = tuner gain in tenths of Db; default = 0 means "auto gain"
+    # -ex = extra loopTime in ms; default = 0
+    # -fc = frequency correction for all channels; default = 0
     # -u  = log undefined signals
     #
     # The options below will autoamically be set
-    # -tf = transmitter frequencies, EU, or US
+    # -tf = transmitter frequencies, US, NZ or EU
     # -tr = transmitters: tr1=1,  tr2=2,  tr3=4,  tr4=8, 
     #                     tr5=16, tr6=32, tr7=64, tr8=128
 
-    # Radio frequency to use between USB transceiver and console: US or EU
-    # US uses 915 MHz, EU uses 868.3 MHz.  Default is EU.
+    # Radio frequency to use between USB transceiver and console: US, NZ or EU
+    # US uses 915 MHz, NZ uses 921 MHz and EU uses 868.3 MHz.  Default is EU.
     transceiver_frequency = EU
     
     # Used channels: 0=not present, 1-8)
@@ -739,7 +787,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         self.ld_library_path = stn_dict.get('ld_library_path', None)
 
         freq = stn_dict.get('transceiver_frequency', self.DEFAULT_FREQUENCY)
-        if freq not in ['EU', 'US']:
+        if freq not in ['US', 'NZ', 'EU']:
             raise ValueError("invalid frequency %s" % freq)
         self.frequency = freq
         loginf('using frequency %s' % self.frequency)
@@ -935,7 +983,15 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         return 'Rtldavis'
 
     def genLoopPackets(self):
+        packet = dict()
         time_last_received = int(time.time())
+        # change the presentation of the FrequencyErrors of the transmitters 
+        #  each period
+        periodShowOneTransm = 2*24*3600  # 2 days
+        rel_transm_to_store = int(((time_last_received-(3*3600)) % (periodShowOneTransm * self.tr_count)) / periodShowOneTransm)
+        self.transm_to_store = self.stats['activeTrIds'][rel_transm_to_store]
+        dbg_parse(1, "Number of transmitters: %s, store freqError data for transmitter: %s" % (self.tr_count, self.transm_to_store))
+        
         while self._mgr.running():
             # the stalled timeout must be greater than the init period
             # init period is EU: 16 s, US, AU and NZ: 133 s
@@ -1187,6 +1243,8 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         data['humid_1'] = humidity
                     elif data['channel'] == self.channels['temp_hum_2']:
                         data['humid_2'] = humidity
+                    elif data['channel'] == self.channels['anemometer']:
+                        loginf("Warning: humidity sensor of Anemometer Transmitter Kit not in sensor map: %s" % humidity)
                     else:
                         data['humidity'] = humidity
                     dbg_parse(2, "humidity_raw=0x%03x value=%s" %
