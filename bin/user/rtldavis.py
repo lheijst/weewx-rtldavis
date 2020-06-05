@@ -94,6 +94,7 @@ import weewx.drivers
 import weewx.engine
 import weewx.units
 from weewx.crc16 import crc16
+from weewx.units import obs_group_dict
 from weeutil.weeutil import tobool
 
 try:
@@ -128,7 +129,14 @@ except ImportError:
         logmsg(syslog.LOG_ERR, msg)
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.16'
+DRIVER_VERSION = '0.17'
+
+weewx.units.obs_group_dict['frequency'] = 'group_frequency'
+weewx.units.USUnits['group_frequency'] = 'hertz'
+weewx.units.MetricUnits['group_frequency'] = 'hertz'
+weewx.units.MetricWXUnits['group_frequency'] = 'hertz'
+weewx.units.default_unit_format_dict['hertz'] = '%.0f'
+weewx.units.default_unit_label_dict['hertz'] = ' Hz'
 
 if weewx.__version__ < "3":
     raise weewx.UnsupportedFeature("weewx 3 is required, found %s" %
@@ -751,6 +759,8 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 
     def __init__(self, engine, config_dict):
         loginf('driver version is %s' % DRIVER_VERSION)
+        self.setup_units_rtld_schema()
+
         if engine:
             weewx.engine.StdService.__init__(self, engine, config_dict)
         stn_dict = config_dict.get(DRIVER_NAME, {})
@@ -990,7 +1000,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
         periodShowOneTransm = 2*24*3600  # 2 days
         rel_transm_to_store = int(((time_last_received-(3*3600)) % (periodShowOneTransm * self.tr_count)) / periodShowOneTransm)
         self.transm_to_store = self.stats['activeTrIds'][rel_transm_to_store]
-        dbg_parse(1, "Number of transmitters: %s, store freqError data for transmitter: %s" % (self.tr_count, self.transm_to_store))
+        dbg_parse(1, "Number of transmitters: %s, store freqError data for transmitter with ID=%s" % (self.tr_count, self.transm_to_store))
         
         while self._mgr.running():
             # the stalled timeout must be greater than the init period
@@ -1347,6 +1357,20 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                    (data['channel'], raw))
         return data
 
+    @staticmethod
+    def setup_units_rtld_schema():
+        obs_group_dict['extraTemp1']        = 'group_percent'
+        obs_group_dict['extraTemp2']        = 'group_percent'
+        obs_group_dict['extraTemp3']        = 'group_percent'
+        obs_group_dict['leafTemp2']         = 'group_percent'
+        obs_group_dict['consBatteryVoltage'] = 'group_frequency'
+        obs_group_dict['hail']              = 'group_frequency'
+        obs_group_dict['hailRate']          = 'group_frequency'
+        obs_group_dict['heatingTemp']       = 'group_frequency'
+        obs_group_dict['heatingVoltage']    = 'group_frequency'
+
+
+############################## Conf Editor ############################## 
 
 if __name__ == '__main__':
     import optparse
