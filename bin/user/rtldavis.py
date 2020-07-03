@@ -129,7 +129,7 @@ except ImportError:
         logmsg(syslog.LOG_ERR, msg)
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.17'
+DRIVER_VERSION = '0.18'
 
 weewx.units.obs_group_dict['frequency'] = 'group_frequency'
 weewx.units.USUnits['group_frequency'] = 'hertz'
@@ -1350,7 +1350,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         dbg_parse(2, "leaf_wetness_%s=%s 0x%03x" %
                                   (sensor_num, leaf_wetness, potential_raw))
                 else:
-                    logerr("unknown subtype '%s' in '%s'" % (data_subtype, raw))
+                    logerr("unknown subtype '%s' in '%s'" % (data_subtype, temp_raw))
 
         else:
             logerr("unknown station with channel: %s, raw message: %s" %
