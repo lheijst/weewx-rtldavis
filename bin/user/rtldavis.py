@@ -97,39 +97,22 @@ from weewx.crc16 import crc16
 from weewx.units import obs_group_dict
 from weeutil.weeutil import tobool
 
-try:
-    # Test for new-style weewx logging by trying to import weeutil.logger
-    import weeutil.logger
-    import logging
-    log = logging.getLogger(__name__)
+# Use new-style weewx logging
+import weeutil.logger
+import logging
+log = logging.getLogger(__name__)
 
-    def logdbg(msg):
-        log.debug(msg)
+def logdbg(msg):
+	log.debug(msg)
 
-    def loginf(msg):
-        log.info(msg)
+def loginf(msg):
+	log.info(msg)
 
-    def logerr(msg):
-        log.error(msg)
-
-except ImportError:
-    # Old-style weewx logging
-    import syslog
-
-    def logmsg(level, msg):
-        syslog.syslog(level, 'rtldavis: %s:' % msg)
-
-    def logdbg(msg):
-        logmsg(syslog.LOG_DEBUG, msg)
-
-    def loginf(msg):
-        logmsg(syslog.LOG_INFO, msg)
-
-    def logerr(msg):
-        logmsg(syslog.LOG_ERR, msg)
+def logerr(msg):
+	log.error(msg)
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.18'
+DRIVER_VERSION = '0.19'
 
 weewx.units.obs_group_dict['frequency'] = 'group_frequency'
 weewx.units.USUnits['group_frequency'] = 'hertz'
@@ -1375,6 +1358,13 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
 if __name__ == '__main__':
     import optparse
 
+    import weewx
+    import weeutil.logger
+
+    weewx.debug = 0
+
+    weeutil.logger.setup('rtldavis', {})
+
     usage = """%prog [--debug] [--help] [--version]
         [--action=(show-packets] [--cmd=RTL_CMD] 
         [--path=PATH] [--ld_library_path=LD_LIBRARY_PATH]
@@ -1384,8 +1374,6 @@ Actions:
 
 """
 
-    syslog.openlog('rtldavis', syslog.LOG_PID | syslog.LOG_CONS)
-    syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_INFO))
     parser = optparse.OptionParser(usage=usage)
     parser.add_option('--version', dest='version', action='store_true',
                       help='display driver version')
@@ -1407,7 +1395,7 @@ Actions:
         exit(1)
 
     if options.debug:
-        syslog.setlogmask(syslog.LOG_UPTO(syslog.LOG_DEBUG))
+        weewx.debug = 1
 
     if options.action == 'show-packets':
         # display output and parsed/unparsed packets
