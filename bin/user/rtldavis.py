@@ -934,8 +934,8 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
             # if there is a total
             if total_max_count > 0 and self.stats['pct_good_all'] is not None:
                 self.stats['pct_good_all'] = 100.0 * total_count / total_max_count
-				logdbg("ARCHIVE_STATS: total_max_count=%d total_count=%d total_missed=%d  pctGood=%6.2f" % 
-					(total_max_count, total_count, total_missed, self.stats['pct_good_all']))
+			    logdbg("ARCHIVE_STATS: total_max_count=%d total_count=%d total_missed=%d  pctGood=%6.2f" % 
+				    (total_max_count, total_count, total_missed, self.stats['pct_good_all']))
             # log the stats for each active transmitter and no-init-counters
             for i in range(0, 4):
                 if self.stats['curr_cnt'][i] > 0 and self.stats['count'][i] > 0 and self.stats['pct_good'] is not None:
