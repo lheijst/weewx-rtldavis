@@ -112,7 +112,7 @@ def logerr(msg):
 	log.error(msg)
 
 DRIVER_NAME = 'Rtldavis'
-DRIVER_VERSION = '0.19'
+DRIVER_VERSION = '0.20'
 
 weewx.units.obs_group_dict['frequency'] = 'group_frequency'
 weewx.units.USUnits['group_frequency'] = 'hertz'
@@ -932,13 +932,13 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         total_missed = total_missed + self.stats['missed'][i]
                         total_max_count = total_max_count + self.stats['max_count'][i]
             # if there is a total
-            if total_max_count > 0:
+            if total_max_count > 0 and self.stats['pct_good_all'] is not None:
                 self.stats['pct_good_all'] = 100.0 * total_count / total_max_count
             logdbg("ARCHIVE_STATS: total_max_count=%d total_count=%d total_missed=%d  pctGood=%6.2f" % 
                 (total_max_count, total_count, total_missed, self.stats['pct_good_all']))
             # log the stats for each active transmitter and no-init-counters
             for i in range(0, 4):
-                if self.stats['curr_cnt'][i] > 0 and self.stats['count'][i] > 0:
+                if self.stats['curr_cnt'][i] > 0 and self.stats['count'][i] > 0 and self.stats['pct_good'] is not None:
                     x = self.stats['activeTrIds'][i]
                     logdbg("ARCHIVE_STATS: station %d: max_count= %4d count=%4d missed=%4d pct_good=%6.2f" % 
                         (i+1, self.stats['max_count'][i], self.stats['count'][i], self.stats['missed'][i], self.stats['pct_good'][i]))
@@ -1196,7 +1196,7 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                         # analog sensor (thermistor)
                         temp_raw /= 4  # 10-bits temp value
                         temp_c = calculate_thermistor_temp(temp_raw)
-                        dbg_parse(2, "thermistor temp_raw=0x%03x temp_c=%s"
+                        dbg_parse(2, "thermistor temp_raw=%s temp_c=%s"
                                   % (temp_raw, temp_c))
                     if data['channel'] == self.channels['temp_hum_1']:
                         data['temp_1'] = temp_c
