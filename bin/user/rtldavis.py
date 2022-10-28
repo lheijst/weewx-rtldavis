@@ -498,7 +498,6 @@ class ProcManager():
                 yield lines
                 lines = []
 
-
 class Packet:
 
     def __init__(self):
@@ -1188,10 +1187,27 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 if temp_raw != 0xFFC:
                     if pkt[4] & 0x8:
                         # digital temp sensor
+                        # remove the simple 1 step (shown below)
+                        # temp_f = temp_raw/10.0 
+                        #
+                        # account for negative values or below zero
+                        #
+                        # need a temp_raw1 so the debug statement can work since temp_raw is changed to an int.
+                        temp_raw1 = temp_raw
+                        #  Just shifting (as above) fails when temperature goes below 0 F
+                        # So need to convert 2 bytes to a signed int for proper values when temp < 0 F
+                        # int.from_bytes is a Python3 expression, would need to do struct.upack for python2
+                        temp_raw = int.from_bytes([pkt[3], pkt[4]], byteorder='big', signed=True)
+                        # The above temp raw (a 16 bit value) needs to be divided by 160 to get true temp
+                        # The 12 bit value is already divided by 16 (ie 12 bits = 16 bits shifted right 4 places)
+                        # but the 16 bit value is not
+                        temp_raw = temp_raw / 16
+                        #
                         temp_f = temp_raw / 10.0
                         temp_c = weewx.wxformulas.FtoC(temp_f) # C
                         dbg_parse(2, "digital temp_raw=0x%03x temp_f=%s temp_c=%s"
-                                  % (temp_raw, temp_f, temp_c))
+                                  % (temp_raw1, temp_f, temp_c))
+
                     else:
                         # analog sensor (thermistor)
                         temp_raw /= 4  # 10-bits temp value
