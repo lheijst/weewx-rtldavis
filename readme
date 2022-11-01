@@ -68,7 +68,8 @@ sudo /etc/init.d/weewx start
 ===============================================================================
 5. How to compile the GO sources  see depository rtldavis readme
 
-5.a) create a profile for the stanard user
+5.a) create a profile for the standard user
+    make sure there is a /home/pi/work directory
     change the path of /home/pi/work when needed
 	sudo nano ~/.profile
 	export GOROOT=/usr/lib/go
@@ -76,6 +77,11 @@ sudo /etc/init.d/weewx start
 	export PATH=$PATH:$GOROOT/bin:$GOPATH/bin
 	source ~/.profile
 5.b) compile the GO src files when needed (i.e. when changed)
+    First time cd /home/pi
+               go get -v github.com/lheijst/rtldavis
+               That should create the /home/pi/work directory
+               You might just want to create it yourself before 
+               this step.
 	cd $GOPATH/src/github.com/lheijst/rtldavis
 	git submodule init
 	git submodule update
@@ -84,6 +90,8 @@ sudo /etc/init.d/weewx start
 
 ===============================================================================
 6. Test the rtldavis executably stand-alone with:
+    /home/pi/work/rtldavis -tf US -tr 1
+    see below for explanation - check to make sure $GOPATH is correct should be /home/pi/work/
 	$GOPATH/bin/rtldavis
 	options:
 	-tr [transceivers]
