@@ -78,7 +78,7 @@ sudo /etc/init.d/weewx start
 	source ~/.profile
 5.b) compile the GO src files when needed (i.e. when changed)
     First time cd /home/pi
-               go get -v github.com/lheijst/rtldavis
+               go install -v github.com/lheijst/rtldavis
                That should create the /home/pi/work directory
                You might just want to create it yourself before 
                this step.
