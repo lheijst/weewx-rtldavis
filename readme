@@ -22,6 +22,11 @@ Installation
 
 1.a) install weewx
     http://weewx.com/docs.html
+     #-- preferred option - use systemd
+	cd /home/weewx
+	sudo cp util/systemd/weewx.service /etc/systemd/system
+	sudo systemctl enable weewx
+	sudo systemctl start weewx
 
 1.b) install golang
     eg: on raspberry pi:
@@ -58,7 +63,9 @@ sudo PYTHONPATH=bin python bin/user/rtldavis.py --cmd="/home/pi/work/bin/rtldavi
 
 9) start weewx
 
-sudo /etc/init.d/weewx start
+	sudo systemctl start weewx 
+	or if you used the old init method
+	sudo /etc/init.d/weewx start
 
 ===============================================================================
 5. How to compile the GO sources
@@ -174,7 +181,8 @@ Be sure that you are capturing data from the sensors you care about.  To do
 this, you might want to experiment with some of the options to rtldavis.  
 
 Once that is working, run the driver directly to be sure that it is collecting
-data from the rtldavis application.
+data from the rtldavis application. The golang rtldavis is sending the
+data via stderr to rtldavis.py
 
 cd /home/weewx
 sudo PYTHONPATH=bin python bin/user/rtldavis.py

@@ -83,10 +83,12 @@ import math
 import string
 import threading
 import time
+import sys
 
 # Python 2/3 compatiblity
 try:
     import Queue as queue   # python 2
+    import struct
 except ImportError:
     import queue            # python 3
 
@@ -497,7 +499,6 @@ class ProcManager():
             except queue.Empty:
                 yield lines
                 lines = []
-
 
 class Packet:
 
@@ -1043,47 +1044,53 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
             # message examples:
             # 51 06 B2 FF 73 00 76 61
             # E0 00 00 4E 05 00 72 61 (no sensor)
-            wind_speed_raw = pkt[1]
-            wind_dir_raw = pkt[2]
-            if not(wind_speed_raw == 0 and wind_dir_raw == 0):
-                """ The elder Vantage Pro and Pro2 stations measured
-                the wind direction with a potentiometer. This type has
-                a fairly big dead band around the North. The Vantage
-                Vue station uses a hall effect device to measure the
-                wind direction. This type has a much smaller dead band,
-                so there are two different formulas for calculating
-                the wind direction. To be able to select the right
-                formula the Vantage type must be known.
-                For now we use the traditional 'pro' formula for all
-                wind directions.
-                """
-                dbg_parse(2, "wind_speed_raw=%03x wind_dir_raw=0x%03x" %
-                          (wind_speed_raw, wind_dir_raw))
-
-                # Vantage Pro and Pro2
-                if wind_dir_raw == 0:
-                    wind_dir_pro = 5.0
-                elif wind_dir_raw == 255:
-                    wind_dir_pro = 355.0
-                else:
-                    wind_dir_pro = 9.0 + (wind_dir_raw - 1) * 342.0 / 253.0
-
-                    # Vantage Vue
-                    wind_dir_vue = wind_dir_raw * 1.40625 + 0.3
-
-                    # wind error correction is by raw byte values
-                    wind_speed_ec = round(calc_wind_speed_ec(wind_speed_raw, wind_dir_raw))
-
-                    data['wind_speed_ec'] = wind_speed_ec
-                    data['wind_speed_raw'] = wind_speed_raw
-                    data['wind_dir'] = wind_dir_pro
-                    data['wind_speed'] = wind_speed_ec * MPH_TO_MPS
-                    dbg_parse(2, "WS=%s WD=%s WS_raw=%s WS_ec=%s WD_raw=%s WD_pro=%s WD_vue=%s" %
-                              (data['wind_speed'], data['wind_dir'],
-                               wind_speed_raw, wind_speed_ec,
-                               wind_dir_raw if wind_dir_raw <= 180 else 360 - wind_dir_raw,
-                               wind_dir_pro, wind_dir_vue))
-
+            #
+            # Check the message type. Don't want any wind data from any
+            # packet that is not defined. Otherwise get bad wind data
+            # 1/2/23 LRB
+            message_type = (pkt[0] >> 4 & 0xF)
+            if message_type in [2, 4, 5, 6, 7, 8, 9, 0xA, 0xE]:
+	            wind_speed_raw = pkt[1]
+	            wind_dir_raw = pkt[2]
+	            if not(wind_speed_raw == 0 and wind_dir_raw == 0):
+	                """ The elder Vantage Pro and Pro2 stations measured
+	                the wind direction with a potentiometer. This type has
+	                a fairly big dead band around the North. The Vantage
+	                Vue station uses a hall effect device to measure the
+	                wind direction. This type has a much smaller dead band,
+	                so there are two different formulas for calculating
+	                the wind direction. To be able to select the right
+	                formula the Vantage type must be known.
+	                For now we use the traditional 'pro' formula for all
+	                wind directions.
+	                """
+	                dbg_parse(2, "wind_speed_raw=%03x wind_dir_raw=0x%03x" %
+	                          (wind_speed_raw, wind_dir_raw))
+	
+	                # Vantage Pro and Pro2
+	                if wind_dir_raw == 0:
+	                    wind_dir_pro = 5.0
+	                elif wind_dir_raw == 255:
+	                    wind_dir_pro = 355.0
+	                else:
+	                    wind_dir_pro = 9.0 + (wind_dir_raw - 1) * 342.0 / 253.0
+	
+	                    # Vantage Vue
+	                    wind_dir_vue = wind_dir_raw * 1.40625 + 0.3
+	
+	                    # wind error correction is by raw byte values
+	                    wind_speed_ec = round(calc_wind_speed_ec(wind_speed_raw, wind_dir_raw))
+	
+	                    data['wind_speed_ec'] = wind_speed_ec
+	                    data['wind_speed_raw'] = wind_speed_raw
+	                    data['wind_dir'] = wind_dir_pro
+	                    data['wind_speed'] = wind_speed_ec * MPH_TO_MPS
+	                    dbg_parse(2, "WS=%s WD=%s WS_raw=%s WS_ec=%s WD_raw=%s WD_pro=%s WD_vue=%s" %
+	                              (data['wind_speed'], data['wind_dir'],
+	                               wind_speed_raw, wind_speed_ec,
+	                               wind_dir_raw if wind_dir_raw <= 180 else 360 - wind_dir_raw,
+	                               wind_dir_pro, wind_dir_vue))
+	        
             # data from both iss sensors and extra sensors on
             # Anemometer Transport Kit
             message_type = (pkt[0] >> 4 & 0xF)
@@ -1188,10 +1195,30 @@ class RtldavisDriver(weewx.drivers.AbstractDevice, weewx.engine.StdService):
                 if temp_raw != 0xFFC:
                     if pkt[4] & 0x8:
                         # digital temp sensor
+                        # remove the simple 1 step (shown below)
+                        # temp_f = temp_raw/10.0 
+                        #
+                        # account for negative values or below zero
+                        #
+                        # need a temp_raw1 so the debug statement can work since temp_raw is changed to an int.
+                        temp_raw1 = temp_raw
+                        #  Just shifting (as above) fails when temperature goes below 0 F
+                        # So need to convert 2 bytes to a signed int for proper values when temp < 0 F
+                        # int.from_bytes is a Python3 expression, would need to do struct.upack for python2
+                        if sys.version_info[0] == 2:
+                           temp_raw = struct.unpack('>h', pkt[3:5])[0]
+                        else:
+                           temp_raw = int.from_bytes([pkt[3], pkt[4]], byteorder='big', signed=True)
+                        # The above temp raw (a 16 bit value) needs to be divided by 160 to get true temp
+                        # The 12 bit value is already divided by 16 (ie 12 bits = 16 bits shifted right 4 places)
+                        # but the 16 bit value is not
+                        temp_raw = temp_raw / 16
+                        #
                         temp_f = temp_raw / 10.0
                         temp_c = weewx.wxformulas.FtoC(temp_f) # C
                         dbg_parse(2, "digital temp_raw=0x%03x temp_f=%s temp_c=%s"
-                                  % (temp_raw, temp_f, temp_c))
+                                  % (temp_raw1, temp_f, temp_c))
+
                     else:
                         # analog sensor (thermistor)
                         temp_raw /= 4  # 10-bits temp value
